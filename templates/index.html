@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Upload de Arquivos</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            padding: 30px;
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2.2em;
+        }
+        
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 0.9em;
+        }
+        
+        .upload-section {
+            background: #f8f9fa;
+            padding: 25px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            border: 2px dashed #667eea;
+            transition: all 0.3s;
+        }
+        
+        .upload-section.dragover {
+            background: #e7f3ff;
+            border-color: #667eea;
+        }
+        
+        .upload-form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .file-input-wrapper {
+            position: relative;
+            display: inline-block;
+            width: 100%;
+        }
+        
+        input[type="file"] {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            background: white;
+        }
+        
+        input[type="file"]:hover {
+            border-color: #667eea;
+        }
+        
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: bold;
+        }
+        
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+            color: #667eea;
+        }
+        
+        .loading.active {
+            display: block;
+        }
+        
+        .arquivos-section {
+            margin-top: 30px;
+        }
+        
+        .arquivos-section h2 {
+            color: #333;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .refresh-btn {
+            background: #28a745;
+            padding: 8px 15px;
+            font-size: 14px;
+            border-radius: 5px;
+        }
+        
+        .arquivos-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .arquivo-item {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-left: 4px solid #667eea;
+            transition: all 0.2s;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+        
+        .arquivo-item:hover {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transform: translateX(5px);
+        }
+        
+        .arquivo-info {
+            flex: 1;
+        }
+        
+        .arquivo-nome {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 8px;
+            font-size: 1.1em;
+        }
+        
+        .arquivo-detalhes {
+            font-size: 0.9em;
+            color: #666;
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .arquivo-acoes {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border-radius: 5px;
+            text-decoration: none;
+            font-size: 14px;
+            transition: all 0.2s;
+            border: none;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        
+        .btn-download {
+            background: #28a745;
+            color: white;
+        }
+        
+        .btn-download:hover {
+            background: #218838;
+            transform: translateY(-2px);
+        }
+        
+        .btn-delete {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .btn-delete:hover {
+            background: #c82333;
+            transform: translateY(-2px);
+        }
+        
+        .mensagem {
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+            text-align: center;
+            animation: slideDown 0.3s ease-out;
+        }
+        
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .mensagem.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .mensagem.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .vazio {
+            text-align: center;
+            color: #666;
+            padding: 60px 20px;
+            font-style: italic;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .vazio::before {
+            content: "📂";
+            font-size: 3em;
+            display: block;
+            margin-bottom: 10px;
+        }
+        
+        .file-icon {
+            margin-right: 8px;
+        }
+        
+        .stats {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        
+        .stat-item {
+            flex: 1;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #667eea;
+        }
+        
+        .stat-label {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .pastas-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 25px;
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            min-height: 300px;
+        }
+        
+        .pasta-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            cursor: pointer;
+            padding: 20px;
+            background: white;
+            border-radius: 10px;
+            transition: all 0.3s;
+            border: 2px solid transparent;
+            text-align: center;
+        }
+        
+        .pasta-item:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 20px rgba(0,0,0,0.15);
+            border-color: #667eea;
+        }
+        
+        .pasta-icon {
+            font-size: 4em;
+            margin-bottom: 10px;
+        }
+        
+        .pasta-nome {
+            font-weight: bold;
+            color: #333;
+            font-size: 1.1em;
+            margin-bottom: 5px;
+        }
+        
+        .pasta-contador {
+            font-size: 0.9em;
+            color: #666;
+        }
+        
+        .user-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .user-name {
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .btn-logout {
+            background: #dc3545;
+            color: white;
+            padding: 8px 15px;
+            font-size: 14px;
+        }
+        
+        .btn-logout:hover {
+            background: #c82333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📚 Meus Arquivos Acadêmicos</h1>
+        <p class="subtitle">Organize seus trabalhos, provas e materiais de estudo</p>
+        
+        <div class="user-header" id="userHeader" style="display: none;">
+            <div class="user-info">
+                <span>👤</span>
+                <span class="user-name" id="userName">Carregando...</span>
+            </div>
+            <button class="btn btn-logout" onclick="fazerLogout()">🚪 Sair</button>
+        </div>
+        
+        <div id="mensagem"></div>
+        
+        <div class="upload-section" id="uploadSection">
+            <h2>Enviar Novo Arquivo</h2>
+            <form class="upload-form" id="uploadForm">
+                <div class="file-input-wrapper">
+                    <input type="file" id="arquivoInput" name="arquivo" required>
+                </div>
+                <select id="categoriaInput" name="categoria" required style="padding: 12px; border: 2px solid #ddd; border-radius: 5px; font-size: 16px; width: 100%;">
+                    <option value="Trabalhos">📝 Trabalhos</option>
+                    <option value="Provas">📋 Provas</option>
+                    <option value="Materiais">📚 Materiais</option>
+                    <option value="Aulas">🎓 Aulas</option>
+                </select>
+                <button type="submit" id="uploadBtn">⬆️ Enviar Arquivo</button>
+            </form>
+        </div>
+        
+        <div class="loading" id="loading">
+            Carregando...
+        </div>
+        
+        <div class="arquivos-section" id="arquivosSection">
+            <div id="breadcrumb" style="display: none; margin-bottom: 20px; padding: 10px; background: #f8f9fa; border-radius: 5px;">
+                <button class="btn" onclick="voltarParaPastas()" style="background: #6c757d; color: white; padding: 8px 15px; font-size: 14px;">
+                    ← Voltar
+                </button>
+                <span id="categoriaAtual" style="margin-left: 15px; font-weight: bold; color: #333;"></span>
+            </div>
+            
+            <h2 id="sectionTitle">Área de Trabalho</h2>
+            
+            <div class="stats" id="stats" style="display: none;">
+                <div class="stat-item">
+                    <div class="stat-value" id="totalArquivos">0</div>
+                    <div class="stat-label">Total de Arquivos</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="tamanhoTotal">0 KB</div>
+                    <div class="stat-label">Tamanho Total</div>
+                </div>
+            </div>
+            
+            <div id="pastasContainer" class="pastas-grid">
+                <!-- Pastas serão inseridas aqui -->
+            </div>
+            
+            <div id="arquivosList" class="arquivos-list" style="display: none;">
+                <!-- Arquivos serão inseridos aqui -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+        let usuarioLogado = null;
+        
+        let categoriaAtual = null;
+        let todosArquivos = [];
+        
+        // Verificar autenticação e carregar dados ao iniciar
+        document.addEventListener('DOMContentLoaded', async () => {
+            await verificarAutenticacao();
+            if (usuarioLogado) {
+                carregarTodasPastas();
+            }
+            
+            // Configurar upload
+            const form = document.getElementById('uploadForm');
+            form.addEventListener('submit', handleUpload);
+            
+            // Drag and drop
+            const uploadSection = document.getElementById('uploadSection');
+            const fileInput = document.getElementById('arquivoInput');
+            
+            uploadSection.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadSection.classList.add('dragover');
+            });
+            
+            uploadSection.addEventListener('dragleave', () => {
+                uploadSection.classList.remove('dragover');
+            });
+            
+            uploadSection.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadSection.classList.remove('dragover');
+                if (e.dataTransfer.files.length > 0) {
+                    fileInput.files = e.dataTransfer.files;
+                    form.dispatchEvent(new Event('submit'));
+                }
+            });
+        });
+        
+        async function verificarAutenticacao() {
+            try {
+                const response = await fetch(`${API_BASE}/usuario`, {
+                    method: 'GET',
+                    credentials: 'include'
+                });
+                
+                if (response.status === 401 || response.status === 403) {
+                    window.location.href = '/login';
+                    return;
+                }
+                
+                const data = await response.json();
+                if (data.sucesso) {
+                    usuarioLogado = data.usuario;
+                    document.getElementById('userName').textContent = usuarioLogado.username;
+                    document.getElementById('userHeader').style.display = 'flex';
+                } else {
+                    window.location.href = '/login';
+                }
+            } catch (error) {
+                console.error('Erro ao verificar autenticação:', error);
+                window.location.href = '/login';
+            }
+        }
+        
+        async function fazerLogout() {
+            try {
+                const response = await fetch(`${API_BASE}/logout`, {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+                
+                const data = await response.json();
+                if (data.sucesso) {
+                    window.location.href = '/login';
+                }
+            } catch (error) {
+                console.error('Erro ao fazer logout:', error);
+                window.location.href = '/login';
+            }
+        }
+        
+        function formatarTamanho(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+        
+        function formatarData(dataString) {
+            const data = new Date(dataString);
+            return data.toLocaleString('pt-BR');
+        }
+        
+        function mostrarMensagem(texto, tipo = 'success') {
+            const mensagemDiv = document.getElementById('mensagem');
+            mensagemDiv.className = `mensagem ${tipo}`;
+            mensagemDiv.textContent = texto;
+            mensagemDiv.style.display = 'block';
+            
+            setTimeout(() => {
+                mensagemDiv.style.display = 'none';
+            }, 5000);
+        }
+        
+        async function carregarTodasPastas() {
+            const loading = document.getElementById('loading');
+            loading.classList.add('active');
+            
+            try {
+                const response = await fetch(`${API_BASE}/arquivos`, {
+                    credentials: 'include'
+                });
+                
+                if (response.status === 401 || response.status == 403) {
+                    window.location.href = '/login';
+                    return;
+                }
+                
+                const data = await response.json();
+                
+                if (data.sucesso) {
+                    todosArquivos = data.arquivos;
+                    exibirPastas();
+                    atualizarEstatisticas(data.arquivos);
+                } else {
+                    mostrarMensagem('Erro ao carregar arquivos: ' + data.erro, 'error');
+                }
+            } catch (error) {
+                mostrarMensagem('Erro ao conectar com o servidor', 'error');
+            } finally {
+                loading.classList.remove('active');
+            }
+        }
+        
+        function exibirPastas() {
+            const pastasContainer = document.getElementById('pastasContainer');
+            const arquivosList = document.getElementById('arquivosList');
+            const breadcrumb = document.getElementById('breadcrumb');
+            const sectionTitle = document.getElementById('sectionTitle');
+            
+            // Esconder lista de arquivos e mostrar pastas
+            arquivosList.style.display = 'none';
+            pastasContainer.style.display = 'grid';
+            breadcrumb.style.display = 'none';
+            sectionTitle.textContent = 'Área de Trabalho';
+            categoriaAtual = null;
+            
+            // Contar arquivos por categoria
+            const contadores = {
+                'Trabalhos': 0,
+                'Provas': 0,
+                'Materiais': 0,
+                'Aulas': 0
+            };
+            
+            todosArquivos.forEach(arq => {
+                const cat = arq.categoria || 'Aulas';
+                if (contadores.hasOwnProperty(cat)) {
+                    contadores[cat]++;
+                }
+            });
+            
+            const pastas = [
+                { nome: 'Trabalhos', icon: '📝', categoria: 'Trabalhos', cor: '#667eea' },
+                { nome: 'Provas', icon: '📋', categoria: 'Provas', cor: '#dc3545' },
+                { nome: 'Materiais', icon: '📚', categoria: 'Materiais', cor: '#28a745' },
+                { nome: 'Aulas', icon: '🎓', categoria: 'Aulas', cor: '#ffc107' }
+            ];
+            
+            pastasContainer.innerHTML = pastas.map(pasta => `
+                <div class="pasta-item" onclick="entrarNaPasta('${pasta.categoria}')" 
+                     style="border-color: ${pasta.cor};">
+                    <div class="pasta-icon">${pasta.icon}</div>
+                    <div class="pasta-nome">${pasta.nome}</div>
+                    <div class="pasta-contador">${contadores[pasta.categoria]} arquivo${contadores[pasta.categoria] !== 1 ? 's' : ''}</div>
+                </div>
+            `).join('');
+        }
+        
+        function entrarNaPasta(categoria) {
+            categoriaAtual = categoria;
+            const arquivosFiltrados = todosArquivos.filter(arq => (arq.categoria || 'Aulas') === categoria);
+            
+            const pastasContainer = document.getElementById('pastasContainer');
+            const arquivosList = document.getElementById('arquivosList');
+            const breadcrumb = document.getElementById('breadcrumb');
+            const categoriaAtualSpan = document.getElementById('categoriaAtual');
+            const sectionTitle = document.getElementById('sectionTitle');
+            
+            // Esconder pastas e mostrar arquivos
+            pastasContainer.style.display = 'none';
+            arquivosList.style.display = 'flex';
+            breadcrumb.style.display = 'flex';
+            
+            const nomesCategoria = {
+                'Trabalhos': '📝 Trabalhos',
+                'Provas': '📋 Provas',
+                'Materiais': '📚 Materiais',
+                'Aulas': '🎓 Aulas'
+            };
+            
+            categoriaAtualSpan.textContent = nomesCategoria[categoria] || categoria;
+            sectionTitle.textContent = nomesCategoria[categoria] || categoria;
+            
+            exibirArquivos(arquivosFiltrados);
+            atualizarEstatisticas(arquivosFiltrados);
+        }
+        
+        function voltarParaPastas() {
+            exibirPastas();
+        }
+        
+        async function carregarArquivos() {
+            await carregarTodasPastas();
+        }
+        
+        function exibirArquivos(arquivos) {
+            const arquivosList = document.getElementById('arquivosList');
+            
+            if (arquivos.length === 0) {
+                arquivosList.innerHTML = '<div class="vazio">Nenhum arquivo ainda. Faça upload de um arquivo para começar!</div>';
+                return;
+            }
+            
+            const categoriaIcon = {
+                'Trabalhos': '📝',
+                'Provas': '📋',
+                'Materiais': '📚',
+                'Aulas': '🎓',
+                'Outros': '📁'
+            };
+            
+            arquivosList.innerHTML = arquivos.map(arquivo => {
+                const categoria = arquivo.categoria || 'Aulas';
+                const icon = categoriaIcon[categoria] || '📄';
+                // Não mostrar badge de categoria se estiver dentro de uma pasta
+                const badgeCategoria = categoriaAtual ? '' : `<span style="background: #667eea; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.75em; margin-left: 10px;">${categoria}</span>`;
+                return `
+                <div class="arquivo-item">
+                    <div class="arquivo-info">
+                        <div class="arquivo-nome">
+                            <span class="file-icon">${icon}</span>
+                            ${arquivo.nome_original}
+                            ${badgeCategoria}
+                        </div>
+                        <div class="arquivo-detalhes">
+                            <span>📏 ${formatarTamanho(arquivo.tamanho)}</span>
+                            <span>📅 ${formatarData(arquivo.data_upload)}</span>
+                            <span>🏷️ ${arquivo.tipo || 'N/A'}</span>
+                        </div>
+                    </div>
+                    <div class="arquivo-acoes">
+                        <button class="btn btn-download" onclick="baixarArquivo(${arquivo.id}, '${arquivo.nome_original.replace(/'/g, "\\'")}')">⬇️ Download</button>
+                        <button class="btn btn-delete" onclick="deletarArquivo(${arquivo.id}, '${arquivo.nome_original.replace(/'/g, "\\'")}')">🗑️ Deletar</button>
+                    </div>
+                </div>
+            `;
+            }).join('');
+        }
+        
+        function atualizarEstatisticas(arquivos) {
+            const stats = document.getElementById('stats');
+            const totalArquivos = document.getElementById('totalArquivos');
+            const tamanhoTotal = document.getElementById('tamanhoTotal');
+            
+            if (arquivos.length > 0) {
+                stats.style.display = 'flex';
+                totalArquivos.textContent = arquivos.length;
+                
+                const totalBytes = arquivos.reduce((sum, arq) => sum + arq.tamanho, 0);
+                tamanhoTotal.textContent = formatarTamanho(totalBytes);
+            } else {
+                stats.style.display = 'none';
+            }
+        }
+        
+        async function handleUpload(e) {
+            e.preventDefault();
+            
+            const fileInput = document.getElementById('arquivoInput');
+            const uploadBtn = document.getElementById('uploadBtn');
+            
+            if (!fileInput.files.length) {
+                mostrarMensagem('Por favor, selecione um arquivo', 'error');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('arquivo', fileInput.files[0]);
+            formData.append('categoria', document.getElementById('categoriaInput').value);
+            
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = '⏳ Enviando...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/upload`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.sucesso) {
+                    mostrarMensagem(data.mensagem, 'success');
+                    fileInput.value = '';
+                    await carregarTodasPastas();
+                    // Se estiver dentro de uma pasta, atualizar a visualização
+                    if (categoriaAtual) {
+                        entrarNaPasta(categoriaAtual);
+                    }
+                } else {
+                    mostrarMensagem('Erro: ' + data.erro, 'error');
+                }
+            } catch (error) {
+                mostrarMensagem('Erro ao enviar arquivo: ' + error.message, 'error');
+            } finally {
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = '⬆️ Enviar Arquivo';
+            }
+        }
+        
+        async function baixarArquivo(id, nome) {
+            try {
+                mostrarMensagem('Iniciando download...', 'success');
+                
+                const response = await fetch(`${API_BASE}/arquivos/${id}/download`, {
+                    method: 'GET',
+                    credentials: 'include'
+                });
+                
+                if (!response.ok) {
+                    // Tentar ler como JSON se possível
+                    let errorMsg = 'Erro desconhecido';
+                    try {
+                        const errorData = await response.json();
+                        errorMsg = errorData.erro || errorMsg;
+                    } catch (e) {
+                        errorMsg = `Erro HTTP ${response.status}: ${response.statusText}`;
+                    }
+                    mostrarMensagem('Erro ao baixar arquivo: ' + errorMsg, 'error');
+                    return;
+                }
+                
+                // Obter o blob do arquivo
+                const blob = await response.blob();
+                
+                // Verificar se o blob está vazio
+                if (blob.size === 0) {
+                    mostrarMensagem('Erro: Arquivo baixado está vazio', 'error');
+                    return;
+                }
+                
+                // Sanitizar nome do arquivo completamente para Windows
+                let filename = nome;
+                
+                // Remover todos os caracteres inválidos
+                filename = filename.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
+                
+                // Remover espaços no início e fim
+                filename = filename.trim();
+                
+                // Remover pontos no início e fim (Windows não permite)
+                filename = filename.replace(/^\.+|\.+$/g, '');
+                
+                // Se ficou vazio, criar nome padrão
+                if (!filename || filename.length === 0) {
+                    const extensao = nome.includes('.') ? '.' + nome.split('.').pop() : '';
+                    filename = `arquivo_${id}${extensao}`;
+                }
+                
+                // Limitar tamanho do nome (Windows tem limite de 255 caracteres)
+                if (filename.length > 200) {
+                    const extensao = filename.includes('.') ? '.' + filename.split('.').pop() : '';
+                    filename = filename.substring(0, 200 - extensao.length) + extensao;
+                }
+                
+                // Criar URL temporária para o blob
+                const url = window.URL.createObjectURL(blob);
+                
+                // Criar link temporário com todas as propriedades necessárias
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = filename; // Nome do arquivo para download
+                a.setAttribute('download', filename); // Garantir atributo download
+                a.setAttribute('target', '_blank'); // Abrir em nova aba (força download)
+                
+                // Adicionar ao DOM (necessário para funcionar)
+                document.body.appendChild(a);
+                
+                // Criar evento de clique e disparar
+                const clickEvent = new MouseEvent('click', {
+                    view: window,
+                    bubbles: true,
+                    cancelable: true
+                });
+                a.dispatchEvent(clickEvent);
+                
+                // Também tentar click() direto como fallback
+                setTimeout(() => {
+                    a.click();
+                }, 10);
+                
+                // Aguardar um pouco antes de limpar (garantir que download iniciou)
+                setTimeout(() => {
+                    // Limpar
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                }, 100);
+                
+                mostrarMensagem(`Download iniciado: ${filename}`, 'success');
+            } catch (error) {
+                console.error('Erro ao baixar arquivo:', error);
+                mostrarMensagem('Erro ao baixar arquivo: ' + error.message, 'error');
+            }
+        }
+        
+        async function deletarArquivo(id, nome) {
+            if (!confirm(`Tem certeza que deseja deletar o arquivo "${nome}"?`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/arquivos/${id}`, {
+                    method: 'DELETE',
+                    credentials: 'include'
+                });
+                
+                const data = await response.json();
+                
+                if (data.sucesso) {
+                    mostrarMensagem(data.mensagem, 'success');
+                    await carregarTodasPastas();
+                    // Se estiver dentro de uma pasta, atualizar a visualização
+                    if (categoriaAtual) {
+                        entrarNaPasta(categoriaAtual);
+                    }
+                } else {
+                    mostrarMensagem('Erro: ' + data.erro, 'error');
+                }
+            } catch (error) {
+                mostrarMensagem('Erro ao deletar arquivo: ' + error.message, 'error');
+            }
+        }
+    </script>
+</body>
+</html>

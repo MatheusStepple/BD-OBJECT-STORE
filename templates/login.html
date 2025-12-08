@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Sistema de Upload</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .login-container {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            padding: 40px;
+            width: 100%;
+            max-width: 400px;
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 2em;
+        }
+        
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 0.9em;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+        }
+        
+        input[type="text"],
+        input[type="email"],
+        input[type="password"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .btn {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-bottom: 10px;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .btn-secondary:hover:not(:disabled) {
+            background: #5a6268;
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .mensagem {
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+            text-align: center;
+            animation: slideDown 0.3s ease-out;
+        }
+        
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .mensagem.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .mensagem.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .toggle-form {
+            text-align: center;
+            margin-top: 20px;
+            color: #666;
+        }
+        
+        .toggle-form a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        
+        .toggle-form a:hover {
+            text-decoration: underline;
+        }
+        
+        .default-credentials {
+            background: #e7f3ff;
+            border: 1px solid #b3d9ff;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+            font-size: 0.9em;
+        }
+        
+        .default-credentials strong {
+            color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h1>🔐 Login</h1>
+        <p class="subtitle">Sistema de Upload de Arquivos</p>
+        
+        <div class="default-credentials">
+            <strong>Usuário padrão:</strong><br>
+            Usuário: <strong>admin</strong><br>
+            Senha: <strong>admin123</strong>
+        </div>
+        
+        <div id="mensagem"></div>
+        
+        <form id="loginForm">
+            <div class="form-group">
+                <label for="username">Usuário</label>
+                <input type="text" id="username" name="username" required autocomplete="username">
+            </div>
+            
+            <div class="form-group">
+                <label for="password">Senha</label>
+                <input type="password" id="password" name="password" required autocomplete="current-password">
+            </div>
+            
+            <button type="submit" class="btn btn-primary" id="loginBtn">Entrar</button>
+        </form>
+        
+        <div class="toggle-form">
+            Não tem uma conta? <a href="#" onclick="mostrarRegistro(); return false;">Cadastre-se</a>
+        </div>
+        
+        <form id="registroForm" style="display: none;">
+            <div class="form-group">
+                <label for="reg_username">Usuário</label>
+                <input type="text" id="reg_username" name="username" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="reg_email">Email</label>
+                <input type="email" id="reg_email" name="email" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="reg_password">Senha (mínimo 6 caracteres)</label>
+                <input type="password" id="reg_password" name="password" required minlength="6">
+            </div>
+            
+            <button type="submit" class="btn btn-primary" id="registroBtn">Cadastrar</button>
+            <button type="button" class="btn btn-secondary" onclick="mostrarLogin()">Voltar</button>
+        </form>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+        
+        function mostrarMensagem(texto, tipo = 'success') {
+            const mensagemDiv = document.getElementById('mensagem');
+            mensagemDiv.className = `mensagem ${tipo}`;
+            mensagemDiv.textContent = texto;
+            mensagemDiv.style.display = 'block';
+            
+            setTimeout(() => {
+                mensagemDiv.style.display = 'none';
+            }, 5000);
+        }
+        
+        function mostrarRegistro() {
+            document.getElementById('loginForm').style.display = 'none';
+            document.getElementById('registroForm').style.display = 'block';
+        }
+        
+        function mostrarLogin() {
+            document.getElementById('registroForm').style.display = 'none';
+            document.getElementById('loginForm').style.display = 'block';
+        }
+        
+        // Login
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const loginBtn = document.getElementById('loginBtn');
+            
+            loginBtn.disabled = true;
+            loginBtn.textContent = 'Entrando...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({ username, password })
+                });
+                
+                const data = await response.json();
+                
+                if (data.sucesso) {
+                    mostrarMensagem('Login realizado com sucesso! Redirecionando...', 'success');
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1000);
+                } else {
+                    mostrarMensagem(data.erro || 'Erro ao fazer login', 'error');
+                }
+            } catch (error) {
+                mostrarMensagem('Erro ao conectar com o servidor', 'error');
+            } finally {
+                loginBtn.disabled = false;
+                loginBtn.textContent = 'Entrar';
+            }
+        });
+        
+        // Registro
+        document.getElementById('registroForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const username = document.getElementById('reg_username').value;
+            const email = document.getElementById('reg_email').value;
+            const password = document.getElementById('reg_password').value;
+            const registroBtn = document.getElementById('registroBtn');
+            
+            registroBtn.disabled = true;
+            registroBtn.textContent = 'Cadastrando...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/registro`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({ username, email, password })
+                });
+                
+                const data = await response.json();
+                
+                if (data.sucesso) {
+                    mostrarMensagem(data.mensagem, 'success');
+                    setTimeout(() => {
+                        mostrarLogin();
+                        document.getElementById('username').value = username;
+                    }, 2000);
+                } else {
+                    mostrarMensagem(data.erro || 'Erro ao cadastrar', 'error');
+                }
+            } catch (error) {
+                mostrarMensagem('Erro ao conectar com o servidor', 'error');
+            } finally {
+                registroBtn.disabled = false;
+                registroBtn.textContent = 'Cadastrar';
+            }
+        });
+    </script>
+</body>
+</html>
+

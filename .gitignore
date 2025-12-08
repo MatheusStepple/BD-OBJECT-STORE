@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# Uploads e banco de dados
+uploads/
+arquivos.db
+*.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Variáveis de ambiente
+.env
+
+# Backups e arquivos grandes
+wsl-backup/
+*.tar
+*.tar.gz
+*.zip
+*.iso
+*.img
+
