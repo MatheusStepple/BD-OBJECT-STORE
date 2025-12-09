@@ -4,18 +4,22 @@ import re
 import hashlib
 from datetime import datetime
 from werkzeug.utils import secure_filename
-from config import ALLOWED_EXTENSIONS, MIME_TYPES, UPLOAD_FOLDER
+from config import ALLOWED_EXTENSIONS, MIME_TYPES
 
 def allowed_file(filename):
     """Verifica se o arquivo tem extensão permitida"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def calcular_hash(file_path):
-    """Calcula hash MD5 de um arquivo"""
+def calcular_hash(file_data):
+    """Calcula hash MD5 de dados (bytes ou file-like object)"""
     hash_md5 = hashlib.md5()
-    with open(file_path, 'rb') as f:
-        for chunk in iter(lambda: f.read(4096), b''):
+    if isinstance(file_data, bytes):
+        hash_md5.update(file_data)
+    else:
+        # Se for file-like object
+        for chunk in iter(lambda: file_data.read(4096), b''):
             hash_md5.update(chunk)
+        file_data.seek(0)  # Resetar posição
     return hash_md5.hexdigest()
 
 def sanitize_filename(filename):
@@ -64,6 +68,6 @@ def generate_unique_filename(user_id, original_filename):
     return f"{user_id}_{timestamp}_{nome_seguro}"
 
 def ensure_upload_folder():
-    """Garante que a pasta de uploads existe"""
-    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    """Função mantida para compatibilidade (não é mais necessária com MinIO)"""
+    pass
 

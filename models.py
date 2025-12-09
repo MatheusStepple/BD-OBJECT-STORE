@@ -1,7 +1,6 @@
 """Modelos da aplicação"""
 from flask_login import UserMixin
-from psycopg2.extras import RealDictCursor
-from database import get_db_connection
+from storage import get_user_by_id
 
 class User(UserMixin):
     """Modelo de usuário para Flask-Login"""
@@ -11,14 +10,9 @@ class User(UserMixin):
         self.email = email
 
 def load_user(user_id):
-    """Carrega usuário do banco de dados"""
+    """Carrega usuário do sistema de armazenamento"""
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=RealDictCursor)
-        cursor.execute('SELECT id, username, email FROM usuarios WHERE id = %s', (user_id,))
-        user_data = cursor.fetchone()
-        conn.close()
-        
+        user_data = get_user_by_id(user_id)
         if user_data:
             return User(user_data['id'], user_data['username'], user_data['email'])
         return None

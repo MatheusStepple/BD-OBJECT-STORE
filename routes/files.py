@@ -1,60 +1,167 @@
-"""Rotas de gerenciamento de arquivos"""
-from flask import Blueprint, request, jsonify, send_file, make_response, Response
+"""Rotas de gerenciamento de arquivos - MinIO"""
+from flask import Blueprint, request, jsonify, Response
 from flask_login import login_required, current_user
 from urllib.parse import quote
-from database import get_db_connection
-from psycopg2.extras import RealDictCursor
-from config import UPLOAD_FOLDER, CATEGORIES
+from minio_client import get_minio_client
+from config import CATEGORIES, MINIO_CONFIG
+from storage import get_user_bucket
 from utils import (
-    allowed_file, calcular_hash, sanitize_filename, 
-    get_mime_type, generate_unique_filename, ensure_upload_folder
+    allowed_file, sanitize_filename, 
+    get_mime_type, generate_unique_filename
 )
-import os
+import json
+import hashlib
+from datetime import datetime, timedelta
+import sys
+import logging
+
+# Configurar logger
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+handler = logging.StreamHandler(sys.stdout)
+handler.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(message)s')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 files_bp = Blueprint('files', __name__)
+
+def log(msg):
+    """Função para garantir que logs apareçam no docker-compose logs"""
+    logger.info(msg)
+    sys.stdout.flush()
+    sys.stderr.flush()
+
+def normalize_file_id(file_id):
+    """Normaliza file_id - converte formato sem underscores para formato com underscores"""
+    file_id_str = str(file_id).strip()
+    
+    # Se já tem underscores, retorna como está
+    if '_' in file_id_str:
+        log(f"[NORMALIZE] Já tem underscores: '{file_id_str}'")
+        return file_id_str
+    
+    # Se não tem underscores, tenta adicionar
+    # Formato: 2025120901183519000 -> 20251209_011835_19000
+    if len(file_id_str) >= 14:
+        date_part = file_id_str[:8]   # YYYYMMDD
+        time_part = file_id_str[8:14]  # HHMMSS
+        micro_part = file_id_str[14:]  # microseconds (pode ter qualquer tamanho)
+        
+        normalized = f"{date_part}_{time_part}_{micro_part}"
+        log(f"[NORMALIZE] '{file_id_str}' -> '{normalized}'")
+        return normalized
+    
+    log(f"[NORMALIZE] Não foi possível normalizar: '{file_id_str}'")
+    return file_id_str
+
+def find_metadata_by_prefix(user_id, prefix_search):
+    """Busca metadados por prefixo (data + hora)"""
+    log(f"[FIND] Buscando por prefixo: '{prefix_search}_*'")
+    minio = get_user_minio_client()
+    all_metadata = minio.list_files(prefix=f"metadata/{user_id}/")
+    
+    for meta in all_metadata:
+        parts = meta['key'].split('/')
+        if len(parts) >= 3:
+            found_id = parts[2].replace('.json', '')
+            if found_id.startswith(prefix_search + '_'):
+                log(f"[FIND] ✅ ENCONTRADO: '{found_id}'")
+                return meta['key'], found_id
+    
+    log(f"[FIND] ❌ Nenhum arquivo encontrado com prefixo '{prefix_search}_*'")
+    return None, None
+
+def get_metadata_key(user_id, file_id):
+    """Gera chave para metadados do arquivo"""
+    normalized_id = normalize_file_id(file_id)
+    key = f"metadata/{user_id}/{normalized_id}.json"
+    return key
+
+def get_file_key(user_id, file_id):
+    """Gera chave para arquivo no MinIO"""
+    normalized_id = normalize_file_id(file_id)
+    key = f"files/{user_id}/{normalized_id}"
+    return key
+
+def get_user_minio_client():
+    """Obtém cliente MinIO com bucket do usuário"""
+    bucket_name = get_user_bucket(current_user.id)
+    if not bucket_name:
+        # Não usar bucket padrão - usuário deve selecionar um bucket
+        raise ValueError('Nenhum bucket selecionado. Por favor, selecione um bucket primeiro.')
+    
+    minio = get_minio_client(bucket_name)
+    
+    # Verificar se o bucket existe (não criar automaticamente)
+    if not minio.bucket_exists(bucket_name):
+        raise ValueError(f'Bucket "{bucket_name}" não encontrado. Por favor, selecione outro bucket.')
+    
+    return minio
+
+def list_user_files(user_id):
+    """Lista todos os arquivos do usuário"""
+    try:
+        log(f"[LIST] Listando arquivos para user_id={user_id}")
+        minio = get_user_minio_client()
+        metadata_files = minio.list_files(prefix=f"metadata/{user_id}/")
+        log(f"[LIST] Encontrados {len(metadata_files)} metadados")
+        
+        arquivos = []
+        for meta_file in metadata_files:
+            if meta_file['key'].endswith('.json'):
+                try:
+                    file_data, _ = minio.download_file(meta_file['key'])
+                    metadata = json.loads(file_data.decode('utf-8'))
+                    arquivos.append(metadata)
+                except Exception as e:
+                    log(f"[LIST] ERRO ao carregar {meta_file['key']}: {e}")
+                    continue
+        
+        return arquivos
+    except Exception as e:
+        log(f"[LIST] ERRO: {e}")
+        return []
 
 @files_bp.route('/api/arquivos', methods=['GET'])
 @login_required
 def listar_arquivos():
     """Lista arquivos do usuário com filtros opcionais"""
     try:
-        # Obter parâmetros de busca e filtro
+        log("=" * 80)
+        log("[LISTAR] INICIANDO")
+        log(f"[LISTAR] User ID: {current_user.id}")
+        
         busca = request.args.get('busca', '').strip()
         categoria = request.args.get('categoria', '').strip()
         
-        conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        arquivos = list_user_files(current_user.id)
         
-        # Construir query com filtros
-        query = 'SELECT * FROM arquivos WHERE user_id = %s'
-        params = [current_user.id]
-        
+        # Aplicar filtros
         if categoria and categoria in CATEGORIES:
-            query += ' AND categoria = %s'
-            params.append(categoria)
+            arquivos = [a for a in arquivos if a.get('categoria') == categoria]
         
         if busca:
-            query += ' AND nome_original ILIKE %s'
-            params.append(f'%{busca}%')
+            busca_lower = busca.lower()
+            arquivos = [a for a in arquivos if busca_lower in a.get('nome_original', '').lower()]
         
-        query += ' ORDER BY data_upload DESC'
+        arquivos.sort(key=lambda x: x.get('data_upload', ''), reverse=True)
         
-        cursor.execute(query, params)
-        arquivos = []
-        for row in cursor.fetchall():
-            arquivos.append({
-                'id': row['id'],
-                'nome_original': row['nome_original'],
-                'nome_arquivo': row['nome_arquivo'],
-                'tamanho': row['tamanho'],
-                'tipo': row['tipo'],
-                'categoria': row.get('categoria', 'Outros'),
-                'data_upload': row['data_upload'].isoformat() if row['data_upload'] else None,
-                'hash_md5': row['hash_md5']
-            })
-        conn.close()
+        log(f"[LISTAR] Retornando {len(arquivos)} arquivos")
+        log("=" * 80)
         return jsonify({'sucesso': True, 'arquivos': arquivos})
+    except ValueError as e:
+        # Erro de bucket não selecionado - retornar sucesso mas com mensagem
+        log(f"[LISTAR] ⚠️ {e}")
+        return jsonify({
+            'sucesso': True, 
+            'arquivos': [],
+            'mensagem': str(e)
+        })
     except Exception as e:
+        log(f"[LISTAR] ERRO: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'sucesso': False, 'erro': str(e)}), 500
 
 @files_bp.route('/api/upload', methods=['POST'])
@@ -62,11 +169,23 @@ def listar_arquivos():
 def upload_arquivo():
     """Endpoint para upload de arquivo"""
     try:
-        # Verificar se arquivo foi enviado
+        log("=" * 80)
+        log("[UPLOAD] ========== INICIANDO UPLOAD ==========")
+        log(f"[UPLOAD] User ID: {current_user.id}")
+        
+        # Verificar se há bucket selecionado
+        bucket_name = get_user_bucket(current_user.id)
+        if not bucket_name:
+            return jsonify({
+                'sucesso': False, 
+                'erro': 'Nenhum bucket selecionado. Por favor, selecione um bucket primeiro.'
+            }), 400
+        
         if 'arquivo' not in request.files:
             return jsonify({'sucesso': False, 'erro': 'Nenhum arquivo enviado'}), 400
         
         arquivo = request.files['arquivo']
+        log(f"[UPLOAD] Arquivo: {arquivo.filename}")
         
         if arquivo.filename == '' or not arquivo.filename:
             return jsonify({'sucesso': False, 'erro': 'Nome de arquivo vazio'}), 400
@@ -74,195 +193,404 @@ def upload_arquivo():
         if not allowed_file(arquivo.filename):
             return jsonify({'sucesso': False, 'erro': 'Tipo de arquivo não permitido'}), 400
         
-        # Obter informações do arquivo
-        nome_original = arquivo.filename
-        nome_arquivo = generate_unique_filename(current_user.id, nome_original)
-        caminho_arquivo = os.path.join(UPLOAD_FOLDER, nome_arquivo)
+        # Ler arquivo
+        file_data = arquivo.read()
+        log(f"[UPLOAD] Tamanho: {len(file_data)} bytes")
         
-        # Garantir que a pasta existe
-        ensure_upload_folder()
-        
-        # Salvar arquivo
-        arquivo.save(caminho_arquivo)
-        
-        # Verificar se arquivo foi salvo corretamente
-        if not os.path.exists(caminho_arquivo):
-            return jsonify({'sucesso': False, 'erro': 'Erro ao salvar arquivo no servidor'}), 500
-        
-        # Calcular hash e tamanho do arquivo salvo
-        tamanho = os.path.getsize(caminho_arquivo)
-        if tamanho == 0:
-            os.remove(caminho_arquivo)
+        if len(file_data) == 0:
             return jsonify({'sucesso': False, 'erro': 'Arquivo vazio não permitido'}), 400
         
-        hash_md5 = calcular_hash(caminho_arquivo)
+        # Calcular hash
+        hash_md5 = hashlib.md5(file_data).hexdigest()
         
-        # Obter tipo MIME
+        # Informações
+        nome_original = arquivo.filename
+        tamanho = len(file_data)
         tipo_mime = get_mime_type(nome_original, arquivo.content_type)
-        
-        # Obter categoria (se enviada)
         categoria = request.form.get('categoria', 'Outros')
         if categoria not in CATEGORIES:
             categoria = 'Outros'
         
-        # Salvar no banco de dados
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        try:
-            cursor.execute('''
-                INSERT INTO arquivos (user_id, nome_original, nome_arquivo, tamanho, tipo, categoria, hash_md5)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
-            ''', (current_user.id, nome_original, nome_arquivo, tamanho, tipo_mime, categoria, hash_md5))
-            arquivo_id = cursor.fetchone()[0]
-            conn.commit()
-        except Exception as db_error:
-            conn.rollback()
-            # Se falhar ao salvar no banco, remover arquivo físico
-            if os.path.exists(caminho_arquivo):
-                os.remove(caminho_arquivo)
-            raise db_error
-        finally:
-            conn.close()
+        # Gerar ID
+        timestamp = datetime.now()
+        file_id = f"{timestamp.strftime('%Y%m%d_%H%M%S')}_{timestamp.microsecond}"
+        log(f"[UPLOAD] File ID gerado: {file_id}")
+        
+        # Chaves
+        file_key = get_file_key(current_user.id, file_id)
+        metadata_key = get_metadata_key(current_user.id, file_id)
+        
+        # Upload para MinIO
+        minio = get_user_minio_client()
+        
+        log(f"[UPLOAD] Fazendo upload do arquivo...")
+        minio.upload_file(
+            file_data,
+            file_key,
+            metadata={
+                'nome-original': nome_original,
+                'user-id': str(current_user.id),
+                'categoria': categoria
+            },
+            content_type=tipo_mime
+        )
+        log(f"[UPLOAD] ✅ Arquivo enviado: {file_key}")
+        
+        # Verificar
+        if not minio.file_exists(file_key):
+            log(f"[UPLOAD] ❌ ERRO: Arquivo não encontrado após upload!")
+        
+        # Criar metadados
+        metadata = {
+            'id': file_id,
+            'user_id': current_user.id,
+            'nome_original': nome_original,
+            'file_key': file_key,
+            'tamanho': tamanho,
+            'tipo': tipo_mime,
+            'categoria': categoria,
+            'data_upload': timestamp.isoformat(),
+            'hash_md5': hash_md5
+        }
+        
+        # Salvar metadados
+        metadata_json = json.dumps(metadata, ensure_ascii=False).encode('utf-8')
+        minio.upload_file(
+            metadata_json,
+            metadata_key,
+            content_type='application/json'
+        )
+        log(f"[UPLOAD] ✅ Metadados salvos: {metadata_key}")
+        
+        # Verificar metadados
+        if not minio.file_exists(metadata_key):
+            log(f"[UPLOAD] ❌ ERRO: Metadados não encontrados após upload!")
+        
+        log("=" * 80)
+        log(f"[UPLOAD] ✅✅✅ UPLOAD CONCLUÍDO: {file_id}")
+        log("=" * 80)
         
         return jsonify({
             'sucesso': True,
             'mensagem': 'Arquivo enviado com sucesso!',
             'arquivo': {
-                'id': arquivo_id,
+                'id': file_id,
                 'nome_original': nome_original,
-                'nome_arquivo': nome_arquivo,
                 'tamanho': tamanho,
                 'hash_md5': hash_md5
             }
         })
+    except ValueError as e:
+        # Erro de bucket não selecionado
+        log(f"[UPLOAD] ❌ {e}")
+        return jsonify({'sucesso': False, 'erro': str(e)}), 400
     except Exception as e:
-        print(f"Erro no upload: {str(e)}")
+        log("=" * 80)
+        log(f"[UPLOAD] ❌❌❌ ERRO NO UPLOAD ❌❌❌")
+        log(f"[UPLOAD] Erro: {str(e)}")
+        log("=" * 80)
         import traceback
         traceback.print_exc()
         return jsonify({'sucesso': False, 'erro': f'Erro ao processar upload: {str(e)}'}), 500
 
-@files_bp.route('/api/arquivos/<int:arquivo_id>', methods=['DELETE'])
+@files_bp.route('/api/arquivos/<file_id>', methods=['DELETE'])
 @login_required
-def deletar_arquivo(arquivo_id):
+def deletar_arquivo(file_id):
     """Endpoint para deletar arquivo"""
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        log("=" * 80)
+        log("[DELETE] ========== INICIANDO DELETE ==========")
+        log(f"[DELETE] File ID recebido: '{file_id}'")
+        log(f"[DELETE] User ID: {current_user.id}")
         
-        # Verificar se o arquivo pertence ao usuário
-        cursor.execute('SELECT nome_arquivo FROM arquivos WHERE id = %s AND user_id = %s', (arquivo_id, current_user.id))
-        resultado = cursor.fetchone()
+        minio = get_user_minio_client()
         
-        if not resultado:
-            conn.close()
+        # Normalizar file_id
+        normalized_file_id = normalize_file_id(file_id)
+        log(f"[DELETE] File ID normalizado: '{normalized_file_id}'")
+        
+        # Tentar buscar metadados exatos primeiro
+        metadata_key = get_metadata_key(current_user.id, normalized_file_id)
+        log(f"[DELETE] Buscando metadados: {metadata_key}")
+        
+        # Se não encontrar, buscar por prefixo
+        if not minio.file_exists(metadata_key):
+            log(f"[DELETE] ❌ Metadados não encontrados exatamente!")
+            # Extrair prefixo (data + hora)
+            prefix_parts = normalized_file_id.split('_')
+            if len(prefix_parts) >= 2:
+                prefix_search = '_'.join(prefix_parts[:2])  # YYYYMMDD_HHMMSS
+                log(f"[DELETE] Tentando busca por prefixo: {prefix_search}_*")
+                
+                found_key, found_id = find_metadata_by_prefix(current_user.id, prefix_search)
+                if found_key:
+                    log(f"[DELETE] ✅ ENCONTRADO POR PREFIXO: {found_id}")
+                    metadata_key = found_key
+                    normalized_file_id = found_id
+                else:
+                    log(f"[DELETE] ❌ Nenhum arquivo encontrado!")
+                    return jsonify({'sucesso': False, 'erro': 'Arquivo não encontrado ou sem permissão'}), 404
+            else:
+                return jsonify({'sucesso': False, 'erro': 'Arquivo não encontrado ou sem permissão'}), 404
+        
+        log(f"[DELETE] ✅ Metadados encontrados!")
+        
+        # Carregar metadados
+        file_data, _ = minio.download_file(metadata_key)
+        metadata = json.loads(file_data.decode('utf-8'))
+        log(f"[DELETE] Metadados: file_key={metadata.get('file_key')}")
+        
+        # Verificar permissão
+        if metadata.get('user_id') != current_user.id:
+            log(f"[DELETE] ❌ Arquivo não pertence ao usuário!")
             return jsonify({'sucesso': False, 'erro': 'Arquivo não encontrado ou sem permissão'}), 404
         
-        nome_arquivo = resultado['nome_arquivo']
-        caminho_arquivo = os.path.join(UPLOAD_FOLDER, nome_arquivo)
+        # Deletar arquivo
+        file_key = metadata.get('file_key')
+        if file_key:
+            log(f"[DELETE] Deletando arquivo: {file_key}")
+            try:
+                if minio.file_exists(file_key):
+                    minio.delete_file(file_key)
+                    log(f"[DELETE] ✅ Arquivo deletado")
+            except Exception as e:
+                log(f"[DELETE] ⚠️ Erro ao deletar arquivo: {e}")
         
-        # Deletar do banco de dados
-        cursor.execute('DELETE FROM arquivos WHERE id = %s AND user_id = %s', (arquivo_id, current_user.id))
-        conn.commit()
-        conn.close()
+        # Deletar metadados
+        minio.delete_file(metadata_key)
+        log(f"[DELETE] ✅ Metadados deletados")
         
-        # Deletar arquivo físico
-        if os.path.exists(caminho_arquivo):
-            os.remove(caminho_arquivo)
+        log("=" * 80)
+        log(f"[DELETE] ✅✅✅ DELETE CONCLUÍDO")
+        log("=" * 80)
         
         return jsonify({'sucesso': True, 'mensagem': 'Arquivo deletado com sucesso!'})
+    except FileNotFoundError:
+        return jsonify({'sucesso': False, 'erro': 'Arquivo não encontrado'}), 404
+    except ValueError as e:
+        # Erro de bucket não selecionado
+        log(f"[DELETE] ❌ {e}")
+        return jsonify({'sucesso': False, 'erro': str(e)}), 400
     except Exception as e:
+        log("=" * 80)
+        log(f"[DELETE] ❌❌❌ ERRO NO DELETE ❌❌❌")
+        log(f"[DELETE] Erro: {str(e)}")
+        log("=" * 80)
+        import traceback
+        traceback.print_exc()
         return jsonify({'sucesso': False, 'erro': str(e)}), 500
 
-@files_bp.route('/api/arquivos/<int:arquivo_id>/download', methods=['GET'])
+@files_bp.route('/api/arquivos/<file_id>/download', methods=['GET'])
 @login_required
-def download_arquivo(arquivo_id):
+def download_arquivo(file_id):
     """Endpoint para download de arquivo"""
     try:
-        # Buscar informações do arquivo no banco
-        conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=RealDictCursor)
-        cursor.execute('''
-            SELECT nome_original, nome_arquivo, tipo, tamanho, hash_md5
-            FROM arquivos 
-            WHERE id = %s AND user_id = %s
-        ''', (arquivo_id, current_user.id))
-        resultado = cursor.fetchone()
-        conn.close()
+        log("=" * 80)
+        log("[DOWNLOAD] ========== INICIANDO DOWNLOAD ==========")
+        log(f"[DOWNLOAD] File ID recebido: '{file_id}'")
+        log(f"[DOWNLOAD] User ID: {current_user.id}")
         
-        if not resultado:
+        minio = get_user_minio_client()
+        
+        # Normalizar file_id
+        normalized_file_id = normalize_file_id(file_id)
+        log(f"[DOWNLOAD] File ID normalizado: '{normalized_file_id}'")
+        
+        # Tentar buscar metadados exatos primeiro
+        metadata_key = get_metadata_key(current_user.id, normalized_file_id)
+        log(f"[DOWNLOAD] Buscando metadados: {metadata_key}")
+        
+        # Se não encontrar, buscar por prefixo
+        if not minio.file_exists(metadata_key):
+            log(f"[DOWNLOAD] ❌ Metadados não encontrados exatamente!")
+            # Extrair prefixo (data + hora)
+            prefix_parts = normalized_file_id.split('_')
+            if len(prefix_parts) >= 2:
+                prefix_search = '_'.join(prefix_parts[:2])  # YYYYMMDD_HHMMSS
+                log(f"[DOWNLOAD] Tentando busca por prefixo: {prefix_search}_*")
+                
+                found_key, found_id = find_metadata_by_prefix(current_user.id, prefix_search)
+                if found_key:
+                    log(f"[DOWNLOAD] ✅ ENCONTRADO POR PREFIXO: {found_id}")
+                    metadata_key = found_key
+                    normalized_file_id = found_id
+                else:
+                    log(f"[DOWNLOAD] ❌ Nenhum arquivo encontrado!")
+                    return jsonify({'sucesso': False, 'erro': 'Arquivo não encontrado ou sem permissão'}), 404
+            else:
+                return jsonify({'sucesso': False, 'erro': 'Arquivo não encontrado ou sem permissão'}), 404
+        
+        log(f"[DOWNLOAD] ✅ Metadados encontrados!")
+        
+        # Carregar metadados
+        file_data, _ = minio.download_file(metadata_key)
+        metadata = json.loads(file_data.decode('utf-8'))
+        log(f"[DOWNLOAD] Metadados: file_key={metadata.get('file_key')}, nome={metadata.get('nome_original')}")
+        
+        # Verificar permissão
+        if metadata.get('user_id') != current_user.id:
+            log(f"[DOWNLOAD] ❌ Arquivo não pertence ao usuário!")
             return jsonify({'sucesso': False, 'erro': 'Arquivo não encontrado ou sem permissão'}), 404
         
-        nome_original = resultado['nome_original']
-        nome_arquivo = resultado['nome_arquivo']
-        tipo_mime = resultado.get('tipo') or 'application/octet-stream'
+        # Baixar arquivo
+        file_key = metadata.get('file_key')
+        if not file_key:
+            log(f"[DOWNLOAD] ❌ Chave do arquivo não encontrada!")
+            return jsonify({'sucesso': False, 'erro': 'Chave do arquivo não encontrada'}), 404
         
-        # Construir caminho completo do arquivo
-        caminho_arquivo = os.path.join(UPLOAD_FOLDER, nome_arquivo)
-        caminho_arquivo = os.path.normpath(caminho_arquivo)
+        log(f"[DOWNLOAD] Buscando arquivo: {file_key}")
         
-        # Verificar se arquivo existe
-        if not os.path.exists(caminho_arquivo):
-            print(f"ERRO: Arquivo não encontrado: {caminho_arquivo}")
-            return jsonify({
-                'sucesso': False, 
-                'erro': f'Arquivo físico não encontrado no servidor. Caminho: {caminho_arquivo}'
-            }), 404
+        if not minio.file_exists(file_key):
+            log(f"[DOWNLOAD] ❌ Arquivo não encontrado no MinIO!")
+            return jsonify({'sucesso': False, 'erro': 'Arquivo não encontrado no armazenamento'}), 404
         
-        # Verificar tamanho do arquivo
-        tamanho_real = os.path.getsize(caminho_arquivo)
-        if tamanho_real == 0:
-            return jsonify({'sucesso': False, 'erro': 'Arquivo está vazio'}), 500
+        log(f"[DOWNLOAD] ✅ Arquivo encontrado! Fazendo download...")
+        file_content, content_type = minio.download_file(file_key)
+        log(f"[DOWNLOAD] ✅ Arquivo baixado: {len(file_content)} bytes")
         
-        # Sanitizar nome do arquivo para Windows
+        nome_original = metadata.get('nome_original', 'arquivo')
         nome_sanitizado = sanitize_filename(nome_original)
+        nome_encoded = quote(nome_sanitizado.encode('utf-8'))
         
-        # Ler arquivo e enviar
-        try:
-            # Usar send_file com headers explícitos para forçar download
-            response = make_response(send_file(
-                caminho_arquivo,
-                mimetype=tipo_mime,
-                as_attachment=True,
-                download_name=nome_sanitizado
-            ))
-            
-            # Garantir headers corretos para forçar download
-            nome_encoded = quote(nome_sanitizado.encode('utf-8'))
-            response.headers['Content-Disposition'] = f'attachment; filename="{nome_sanitizado}"; filename*=UTF-8\'\'{nome_encoded}'
-            response.headers['Content-Type'] = tipo_mime
-            response.headers['X-Content-Type-Options'] = 'nosniff'
-            
-            return response
-        except Exception as send_error:
-            print(f"Erro ao usar send_file: {send_error}")
-            # Fallback: ler arquivo e enviar manualmente
-            try:
-                with open(caminho_arquivo, 'rb') as f:
-                    file_data = f.read()
-                
-                nome_encoded = quote(nome_sanitizado.encode('utf-8'))
-                
-                response = Response(
-                    file_data,
-                    mimetype=tipo_mime,
-                    headers={
-                        'Content-Disposition': f'attachment; filename="{nome_sanitizado}"; filename*=UTF-8\'\'{nome_encoded}',
-                        'Content-Length': str(len(file_data)),
-                        'Content-Type': tipo_mime
-                    }
-                )
-                return response
-            except Exception as read_error:
-                print(f"Erro ao ler arquivo: {read_error}")
-                return jsonify({
-                    'sucesso': False, 
-                    'erro': f'Erro ao ler arquivo: {str(read_error)}'
-                }), 500
-            
+        response = Response(
+            file_content,
+            mimetype=content_type or metadata.get('tipo', 'application/octet-stream'),
+            headers={
+                'Content-Disposition': f'attachment; filename="{nome_sanitizado}"; filename*=UTF-8\'\'{nome_encoded}',
+                'Content-Length': str(len(file_content)),
+                'Content-Type': content_type or metadata.get('tipo', 'application/octet-stream'),
+                'X-Content-Type-Options': 'nosniff'
+            }
+        )
+        
+        log("=" * 80)
+        log(f"[DOWNLOAD] ✅✅✅ DOWNLOAD CONCLUÍDO: {nome_original}")
+        log("=" * 80)
+        return response
+    except FileNotFoundError as e:
+        log("=" * 80)
+        log(f"[DOWNLOAD] ❌❌❌ FileNotFoundError ❌❌❌")
+        log(f"[DOWNLOAD] Erro: {e}")
+        log("=" * 80)
+        import traceback
+        traceback.print_exc()
+        return jsonify({'sucesso': False, 'erro': 'Arquivo não encontrado'}), 404
+    except ValueError as e:
+        # Erro de bucket não selecionado
+        log(f"[DOWNLOAD] ❌ {e}")
+        return jsonify({'sucesso': False, 'erro': str(e)}), 400
     except Exception as e:
-        print(f"Erro no download: {str(e)}")
+        log("=" * 80)
+        log(f"[DOWNLOAD] ❌❌❌ ERRO NO DOWNLOAD ❌❌❌")
+        log(f"[DOWNLOAD] Erro: {str(e)}")
+        log("=" * 80)
         import traceback
         traceback.print_exc()
         return jsonify({'sucesso': False, 'erro': f'Erro ao processar download: {str(e)}'}), 500
 
+@files_bp.route('/api/arquivos/<file_id>/share', methods=['POST'])
+@login_required
+def compartilhar_arquivo(file_id):
+    """Gera URL pré-assinada para compartilhamento de arquivo"""
+    try:
+        log("=" * 80)
+        log("[SHARE] ========== GERANDO LINK DE COMPARTILHAMENTO ==========")
+        log(f"[SHARE] File ID recebido: '{file_id}'")
+        log(f"[SHARE] User ID: {current_user.id}")
+        
+        data = request.get_json() or {}
+        expiration = data.get('expiration', 3600)  # Padrão: 1 hora
+        
+        # Validar expiração (entre 60 segundos e 7 dias)
+        if expiration < 60:
+            expiration = 60
+        elif expiration > 604800:  # 7 dias
+            expiration = 604800
+        
+        minio = get_user_minio_client()
+        
+        # Normalizar file_id
+        normalized_file_id = normalize_file_id(file_id)
+        log(f"[SHARE] File ID normalizado: '{normalized_file_id}'")
+        
+        # Buscar metadados
+        metadata_key = get_metadata_key(current_user.id, normalized_file_id)
+        log(f"[SHARE] Buscando metadados: {metadata_key}")
+        
+        # Se não encontrar, buscar por prefixo
+        if not minio.file_exists(metadata_key):
+            log(f"[SHARE] ❌ Metadados não encontrados exatamente!")
+            prefix_parts = normalized_file_id.split('_')
+            if len(prefix_parts) >= 2:
+                prefix_search = '_'.join(prefix_parts[:2])
+                log(f"[SHARE] Tentando busca por prefixo: {prefix_search}_*")
+                
+                found_key, found_id = find_metadata_by_prefix(current_user.id, prefix_search)
+                if found_key:
+                    log(f"[SHARE] ✅ ENCONTRADO POR PREFIXO: {found_id}")
+                    metadata_key = found_key
+                    normalized_file_id = found_id
+                else:
+                    log(f"[SHARE] ❌ Nenhum arquivo encontrado!")
+                    return jsonify({'sucesso': False, 'erro': 'Arquivo não encontrado ou sem permissão'}), 404
+            else:
+                return jsonify({'sucesso': False, 'erro': 'Arquivo não encontrado ou sem permissão'}), 404
+        
+        log(f"[SHARE] ✅ Metadados encontrados!")
+        
+        # Carregar metadados
+        file_data, _ = minio.download_file(metadata_key)
+        metadata = json.loads(file_data.decode('utf-8'))
+        log(f"[SHARE] Metadados: file_key={metadata.get('file_key')}, nome={metadata.get('nome_original')}")
+        
+        # Verificar permissão
+        if metadata.get('user_id') != current_user.id:
+            log(f"[SHARE] ❌ Arquivo não pertence ao usuário!")
+            return jsonify({'sucesso': False, 'erro': 'Arquivo não encontrado ou sem permissão'}), 404
+        
+        # Gerar URL pré-assinada
+        file_key = metadata.get('file_key')
+        if not file_key:
+            log(f"[SHARE] ❌ Chave do arquivo não encontrada!")
+            return jsonify({'sucesso': False, 'erro': 'Chave do arquivo não encontrada'}), 404
+        
+        log(f"[SHARE] Gerando URL pré-assinada para: {file_key}")
+        presigned_url = minio.generate_presigned_url(file_key, expiration=expiration)
+        log(f"[SHARE] ✅ URL pré-assinada gerada")
+        
+        # Calcular data de expiração
+        expires_at = datetime.now() + timedelta(seconds=expiration)
+        
+        log("=" * 80)
+        log(f"[SHARE] ✅✅✅ LINK DE COMPARTILHAMENTO GERADO")
+        log("=" * 80)
+        
+        return jsonify({
+            'sucesso': True,
+            'url': presigned_url,
+            'expires_at': expires_at.isoformat(),
+            'expiration_seconds': expiration,
+            'arquivo': {
+                'id': metadata.get('id'),
+                'nome_original': metadata.get('nome_original'),
+                'tamanho': metadata.get('tamanho')
+            }
+        })
+    except FileNotFoundError as e:
+        log("=" * 80)
+        log(f"[SHARE] ❌❌❌ FileNotFoundError ❌❌❌")
+        log(f"[SHARE] Erro: {e}")
+        log("=" * 80)
+        return jsonify({'sucesso': False, 'erro': 'Arquivo não encontrado'}), 404
+    except ValueError as e:
+        # Erro de bucket não selecionado
+        log(f"[SHARE] ❌ {e}")
+        return jsonify({'sucesso': False, 'erro': str(e)}), 400
+    except Exception as e:
+        log("=" * 80)
+        log(f"[SHARE] ❌❌❌ ERRO AO GERAR LINK ❌❌❌")
+        log(f"[SHARE] Erro: {str(e)}")
+        log("=" * 80)
+        import traceback
+        traceback.print_exc()
+        return jsonify({'sucesso': False, 'erro': f'Erro ao gerar link de compartilhamento: {str(e)}'}), 500

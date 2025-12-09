@@ -5,18 +5,16 @@ from dotenv import load_dotenv
 # Carregar variáveis de ambiente
 load_dotenv()
 
-# Configurações do PostgreSQL
-DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'localhost'),
-    'database': os.getenv('DB_NAME', 'upload_system'),
-    'user': os.getenv('DB_USER', 'postgres'),
-    'password': os.getenv('DB_PASSWORD', 'postgres'),
-    'port': os.getenv('DB_PORT', '5432')
+# Configurações do MinIO
+MINIO_CONFIG = {
+    'endpoint': os.getenv('MINIO_ENDPOINT', 'http://minio:9000'),
+    'access_key': os.getenv('MINIO_ACCESS_KEY', 'minioadmin'),
+    'secret_key': os.getenv('MINIO_SECRET_KEY', 'minioadmin'),
+    'bucket_name': os.getenv('MINIO_BUCKET', 'dados-privados')
 }
 
 # Configurações da aplicação
 SECRET_KEY = os.getenv('SECRET_KEY', 'sua-chave-secreta-aqui-mude-em-producao')
-UPLOAD_FOLDER = 'uploads'
 ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'doc', 'docx', 'zip', 'mp4', 'mp3'}
 PORT = int(os.getenv('PORT', 5000))
 FLASK_ENV = os.getenv('FLASK_ENV', 'development')

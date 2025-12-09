@@ -12,90 +12,90 @@ Sistema web simples para estudantes organizarem trabalhos, provas e materiais de
 - Baixar arquivos quando necessário
 - Ver estatísticas de uso
 
-**Tecnologias:** Python (Flask) + PostgreSQL + HTML/CSS/JavaScript
+**Tecnologias:** Python (Flask) + MinIO (Object Storage) + HTML/CSS/JavaScript
 
 ## 🚀 Como Usar
 
-### 1. Instalar PostgreSQL
+### 🐳 Docker (Recomendado)
 
-**Windows:**
-- Baixe em: https://www.postgresql.org/download/windows/
-- Ou: `winget install PostgreSQL.PostgreSQL`
-- Durante instalação, defina senha (anote para usar no .env)
+#### Pré-requisitos
+- Docker instalado: https://www.docker.com/get-started
+- Docker Compose (geralmente vem com Docker Desktop)
 
-### 2. Criar Banco de Dados
+#### Executar
 
-Abra o PostgreSQL e execute:
-```sql
-CREATE DATABASE upload_system;
-```
-
-### 3. Configurar Credenciais
-
-Crie o arquivo `.env` na raiz do projeto com:
-```
-DB_HOST=localhost
-DB_PORT=5432
-DB_USER=postgres
-DB_PASSWORD=sua_senha_aqui
-DB_NAME=upload_system
-FLASK_ENV=development
-PORT=5000
-SECRET_KEY=770f5dc8-ec89-46b7-adf9-5ed1ec19b682
-```
-
-### 4. Executar o Sistema
-
-**Windows:**
 ```bash
-run.bat
+docker-compose up --build
 ```
 
-**Linux/macOS:**
+**Acessar:**
+- **Backend/API:** http://localhost:5000
+- **MinIO Console:** http://localhost:9001 (minioadmin/minioadmin)
+
+**Login padrão:**
+- **Usuário:** `admin`
+- **Senha:** `admin123`
+
+#### Comandos úteis
+
 ```bash
-chmod +x run.sh
-./run.sh
+# Parar containers
+docker-compose down
+
+# Parar e remover volumes (apaga dados)
+docker-compose down -v
+
+# Ver logs
+docker-compose logs -f
+
+# Ver logs apenas do backend
+docker-compose logs -f backend
 ```
 
-### 5. Acessar
+---
 
-- Abra: http://localhost:5000
-- Faça login com:
-  - **Usuário:** `admin`
-  - **Senha:** `admin123`
+## 🗄️ Armazenamento
+
+### MinIO - Object Storage
+
+O sistema usa **MinIO** para armazenamento de objetos (arquivos).
+
+**Bucket:** `dados-privados`
+
+**Importante:** Este bucket, por padrão, é privado. Somente usuários com credenciais válidas e permissões (como nós) podem acessar ou modificar seu conteúdo.
+
+**Configurações:**
+- Object Locking: **Desabilitado**
+- Versioning: **Desabilitado**
+- Acesso: **Privado** (requer autenticação)
+
+### Estrutura de Armazenamento
+
+```
+dados-privados/
+├── files/
+│   └── {user_id}/
+│       └── {file_id}/
+│           └── {filename}
+└── metadata/
+    └── {user_id}/
+        └── {file_id}.json
+```
 
 ## 📋 Funcionalidades
 
-- ✅ **Cadastro e Login** - Sistema de autenticação
+- ✅ **Cadastro e Login** - Sistema de autenticação simples
 - ✅ **Upload de Arquivos** - Envie trabalhos, provas, materiais
-- ✅ **Categorias** - Organize por: Trabalhos, Provas, Materiais, Aulas
+- ✅ **Categorias** - Organize por: Trabalhos, Provas, Materiais, Aulas, Outros
 - ✅ **Busca** - Encontre arquivos rapidamente pelo nome
 - ✅ **Download** - Baixe seus arquivos quando precisar
 - ✅ **Estatísticas** - Veja total de arquivos e espaço usado
 
-## 🗄️ Banco de Dados
-
-### Tabelas Criadas Automaticamente
-
-**usuarios:**
-- Armazena usuários do sistema
-- Campos: id, username, email, password_hash, data_criacao
-
-**arquivos:**
-- Armazena metadados dos arquivos
-- Campos: id, user_id, nome_original, nome_arquivo, tamanho, tipo, categoria, data_upload, hash_md5
-- Relacionamento: Cada arquivo pertence a um usuário
-
-### Operações Disponíveis
-
-- **CREATE:** Cadastrar usuário, fazer upload de arquivo
-- **READ:** Listar arquivos, buscar por nome, filtrar por categoria
-- **DELETE:** Deletar arquivo (remove do banco e do servidor)
-
 ## 💻 Tecnologias
 
 - **Backend:** Python + Flask
-- **Banco de Dados:** PostgreSQL
+- **Armazenamento:** MinIO (S3-compatible Object Storage)
+- **Cliente S3:** boto3
 - **Frontend:** HTML, CSS, JavaScript
 - **Autenticação:** Flask-Login
 
@@ -104,39 +104,63 @@ chmod +x run.sh
 ```
 .
 ├── app.py              # Aplicação Flask principal
-├── config.py           # Configurações e constantes
-├── database.py         # Gerenciamento do banco de dados
+├── config.py           # Configurações
+├── storage.py          # Gerenciamento de usuários (JSON)
+├── minio_client.py     # Cliente MinIO (boto3)
 ├── models.py           # Modelos (User)
 ├── utils.py            # Funções utilitárias
 ├── requirements.txt    # Dependências Python
-├── .env               # Configurações (crie manualmente)
+├── Dockerfile          # Configuração Docker
+├── docker-compose.yml  # Orquestração Docker
+├── .dockerignore       # Arquivos ignorados no build
 ├── routes/            # Rotas da aplicação
 │   ├── __init__.py
 │   ├── auth.py        # Rotas de autenticação
-│   ├── files.py       # Rotas de arquivos
-│   └── main.py        # Rotas principais (frontend)
+│   ├── files.py        # Rotas de arquivos
+│   └── main.py         # Rotas principais (frontend)
 ├── templates/         # Interface web
 │   ├── index.html    # Página principal
 │   └── login.html    # Página de login
-├── run.bat           # Executar no Windows
-├── run.sh            # Executar no Linux/macOS
 └── README.md         # Este arquivo
+```
+
+## 🔧 Configuração
+
+### Variáveis de Ambiente (opcional)
+
+Crie um arquivo `.env` para personalizar:
+
+```env
+# MinIO
+MINIO_ENDPOINT=http://minio:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin
+MINIO_BUCKET=dados-privados
+
+# Aplicação
+PORT=5000
+SECRET_KEY=sua-chave-secreta-aqui
+FLASK_ENV=development
 ```
 
 ## 🔧 Solução de Problemas
 
-**Erro: "PostgreSQL não está rodando"**
-- Inicie manualmente o serviço PostgreSQL (services.msc no Windows)
+**Erro: "port is already allocated"**
+- Altere a porta no arquivo `.env` ou `docker-compose.yml`
 
-**Erro: "database does not exist"**
-- Crie o banco manualmente: `CREATE DATABASE upload_system;`
+**Erro ao conectar com MinIO**
+- Aguarde alguns segundos após `docker-compose up` - o MinIO precisa inicializar
+- Verifique os logs: `docker-compose logs minio`
 
-**Erro: "password authentication failed"**
-- Verifique a senha no arquivo `.env`
+**Erro ao fazer build**
+- Certifique-se de que o Docker está rodando
+- Tente: `docker-compose build --no-cache`
 
 ## 📝 Notas
 
 - Cada usuário vê apenas seus próprios arquivos
-- Arquivos são salvos na pasta `uploads/`
-- Categorias disponíveis: Trabalhos, Provas, Materiais, Aulas
+- Arquivos são armazenados no MinIO (bucket `dados-privados`)
+- Metadados dos arquivos também são armazenados no MinIO
+- Usuários são armazenados em `users.json` (simples, sem banco de dados)
+- Categorias disponíveis: Trabalhos, Provas, Materiais, Aulas, Outros
 - Usuário padrão criado automaticamente: admin/admin123
